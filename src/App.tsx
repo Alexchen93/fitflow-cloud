@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, useRef } from 'react'
-import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom'
+import { createContext, useContext, useEffect, useMemo, useState, useRef, type ReactNode } from 'react'
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ArrowRight, BookOpen, Check, ChevronDown, ChevronRight, CircleAlert, Dumbbell, Home, ListChecks, LoaderCircle, Menu, Play, RotateCcw, Search, Timer, Trophy, Utensils, X } from 'lucide-react'
 import { api, useAsync } from './api'
 import { useI18n } from './i18n'
@@ -18,22 +18,74 @@ function ErrorState({ message, retry }: { message: string; retry: () => void }) 
 function Empty({ title, detail }: { title: string; detail: string }) { return <div className="state empty"><span className="state-index">00</span><strong>{title}</strong><p>{detail}</p></div> }
 
 declare global { interface Window { google?: { accounts: { id: { initialize: (config: { client_id: string; callback: (response: { credential?: string }) => void }) => void; renderButton: (element: HTMLElement, options: { theme: string; size: string; text: string; locale: string; type?: 'standard' | 'icon' }) => void } } } } }
-function AuthControl() { const { t, locale } = useI18n(); const mount = useRef<HTMLDivElement>(null); const { data: config } = useAsync(api.authConfig, []); const { data: initial, loading } = useAsync(api.me, []); const [user, setUser] = useState<{ email: string; name: string | null; picture: string | null } | null>(null); const [error, setError] = useState<string | null>(null)
-  useEffect(() => { if (initial) setUser(initial.user) }, [initial])
-  useEffect(() => { if (!config?.enabled || !config.clientId || user || !mount.current) return; let active = true; let retry: number | undefined; let attempts = 0; const setup = () => { if (!active || !mount.current) return; if (!window.google?.accounts?.id) { if (attempts++ < 50) retry = window.setTimeout(setup, 100); return } window.google.accounts.id.initialize({ client_id: config.clientId!, callback: async ({ credential }) => { if (!credential) return; try { setError(null); const result = await api.signInWithGoogle(credential); setUser(result.user); window.dispatchEvent(new Event('fitflow-authchange')) } catch { setError(t('登入失敗，請再試一次。', 'Sign-in failed. Please try again.')) } } }); mount.current.replaceChildren(); window.google.accounts.id.renderButton(mount.current, { theme: 'outline', size: 'medium', text: 'signin_with', locale: locale === 'en' ? 'en' : 'zh_TW', type: window.matchMedia('(max-width: 580px)').matches ? 'icon' : 'standard' }) }
-    const existing = document.querySelector<HTMLScriptElement>('script[data-google-gis]'); if (existing) { existing.addEventListener('load', setup); setup(); return () => { active = false; window.clearTimeout(retry); existing.removeEventListener('load', setup) } }
-    const script = document.createElement('script'); script.src = 'https://accounts.google.com/gsi/client'; script.async = true; script.defer = true; script.dataset.googleGis = 'true'; script.addEventListener('load', setup); document.head.append(script); return () => { active = false; window.clearTimeout(retry); script.removeEventListener('load', setup) }
-  }, [config, user, locale, t])
+type AuthUser = { email: string; name: string | null; picture: string | null }
+type AuthState = { user: AuthUser | null; loading: boolean; setUser: (user: AuthUser | null) => void }
+const AuthContext = createContext<AuthState | null>(null)
+function useAuth() { const value = useContext(AuthContext); if (!value) throw new Error('useAuth requires AuthProvider'); return value }
+function AuthProvider({ children }: { children: ReactNode }) { const { data: initial, loading } = useAsync(api.me, []); const [user, setUser] = useState<AuthUser | null>(null); useEffect(() => { if (initial) setUser(initial.user) }, [initial]); return <AuthContext.Provider value={{ user, loading, setUser }}>{children}</AuthContext.Provider> }
+function AuthControl({ variant = 'header' }: { variant?: 'header' | 'landing' }) { const { t, locale } = useI18n(); const { user, loading, setUser } = useAuth(); const mount = useRef<HTMLDivElement>(null); const { data: config } = useAsync(api.authConfig, []); const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!config?.enabled || !config.clientId || user || !mount.current) return
+    let active = true; let retry: number | undefined; let attempts = 0
+    const setup = () => {
+      if (!active || !mount.current) return
+      if (!window.google?.accounts?.id) { if (attempts++ < 50) retry = window.setTimeout(setup, 100); return }
+      window.google.accounts.id.initialize({ client_id: config.clientId!, callback: async ({ credential }) => {
+        if (!credential) return
+        try { setError(null); const result = await api.signInWithGoogle(credential); setUser(result.user); window.dispatchEvent(new Event('fitflow-authchange')) }
+        catch { setError(t('登入失敗，請再試一次。', 'Sign-in failed. Please try again.')) }
+      } })
+      mount.current.replaceChildren()
+      window.google.accounts.id.renderButton(mount.current, { theme: 'outline', size: variant === 'landing' ? 'large' : 'medium', text: 'signin_with', locale: locale === 'en' ? 'en' : 'zh_TW', type: variant === 'header' && window.matchMedia('(max-width: 580px)').matches ? 'icon' : 'standard' })
+    }
+    const existing = document.querySelector<HTMLScriptElement>('script[data-google-gis]')
+    if (existing) { existing.addEventListener('load', setup); setup(); return () => { active = false; window.clearTimeout(retry); existing.removeEventListener('load', setup) } }
+    const script = document.createElement('script')
+    script.src = 'https://accounts.google.com/gsi/client'; script.async = true; script.defer = true; script.dataset.googleGis = 'true'; script.addEventListener('load', setup); document.head.append(script)
+    return () => { active = false; window.clearTimeout(retry); script.removeEventListener('load', setup) }
+  }, [config, user, locale, t, setUser, variant])
   if (loading || !config) return null
   if (!config.enabled) return <span className="auth-unavailable">{t('登入未設定', 'Sign-in unavailable')}</span>
   if (user) return <div className="auth-user"><span>{user.name || user.email}</span><button className="auth-signout" onClick={async () => { await api.signOut(); setUser(null); window.dispatchEvent(new Event('fitflow-authchange')) }}>{t('登出', 'Sign out')}</button></div>
-  return <div className="auth-control"><div ref={mount} />{error && <small role="alert">{error}</small>}</div>
+  return <div className={`auth-control ${variant === 'landing' ? 'landing-auth-control' : ''}`}><div ref={mount} />{error && <small role="alert">{error}</small>}</div>
 }
-
-function Shell() { const { localize, t, locale, setLocale } = useI18n();
+function LandingPage() {
+  const { t } = useI18n()
+  const features = [
+    [Dumbbell, 'TRAINING', t('週期，而非臨時起意', 'A cycle, not a guess'), t('依週次看見訓練主題、動作處方與完成進度，讓每次投入有脈絡。', 'See weekly themes, prescriptions, and completion progress so every effort has context.')],
+    [Utensils, 'NUTRITION', t('用份量記下真正吃了什麼', 'Log what you actually eat'), t('建立食物、輸入克數與餐別，自動整理熱量與三大營養素。', 'Create foods, enter portions and meals, and track calories with macros automatically.')],
+    [Trophy, 'YOUR LOG', t('每個帳號一份訓練帳本', 'One private log per account'), t('Google 登入後，訓練完成紀錄與營養資料都以你的帳號分開保存。', 'After Google sign-in, workout completions and nutrition data stay separated by account.')],
+  ] as const
+  return <div className="landing-page">
+    <section className="landing-hero">
+      <div><p className="eyebrow">FITFLOW CLOUD / PERSONAL TRAINING SYSTEM</p><h1>{t('讓你的訓練和營養，\n有一條清楚的節奏。', 'Give your training and nutrition\na clear rhythm.')}</h1><p className="landing-lead">{t('從今日的一堂訓練、每一餐的份量，到四週週期的累積。FitFlow 將它們收進只屬於你的訓練帳本。', 'From today’s session and every meal to a four-week cycle, FitFlow keeps your progress in a training log that is yours alone.')}</p><div className="landing-actions"><AuthControl variant="landing" /><Link className="button secondary" to="/library">{t('先瀏覽動作庫', 'Browse exercises first')}<ArrowRight size={16} /></Link></div><p className="landing-privacy">{t('使用 Google 帳戶登入。你的訓練與營養紀錄只會顯示給你。', 'Sign in with Google. Your training and nutrition records are visible only to you.')}</p></div>
+      <aside className="landing-meter" aria-label={t('FitFlow 功能摘要', 'FitFlow feature summary')}><span>01</span><strong>{t('建立節奏', 'Build rhythm')}</strong><p>{t('從第一堂課開始，逐步累積。', 'Start with one session, then build steadily.')}</p><div><b>04</b><small>{t('週期週數', 'WEEK CYCLE')}</small></div></aside>
+    </section>
+    <section className="landing-features" aria-label={t('產品特色', 'Product features')}>{features.map(([Icon, eyebrow, title, description]) => <article key={eyebrow}><Icon aria-hidden="true" /><p className="eyebrow">{eyebrow}</p><h2>{title}</h2><p>{description}</p></article>)}</section>
+  </div>
+}
+function PrivateRoute({ children }: { children: ReactNode }) { const { user, loading } = useAuth(); if (loading) return <LandingPage />; return user ? <>{children}</> : <Navigate to="/" replace /> }
+function Shell() {
+  const { localize, t, locale, setLocale } = useI18n()
+  const { user } = useAuth()
+  const location = useLocation()
   const [open, setOpen] = useState(false)
   const { data: health, error: healthError } = useAsync(api.health, [])
-  return <><a className="skip-link" href="#main-content">{localize("跳至主要內容")}</a><header className="site-header"><Link className="brand" to="/" aria-label={localize("FitFlow Cloud 首頁")}><span className="brand-mark">FF</span><span>FITFLOW<small>{localize("週期訓練 / TRAINING LOG")}</small></span></Link><button className="menu-button" aria-label={open ? localize("關閉選單") : localize("開啟選單")} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button><nav className={open ? 'main-nav open' : 'main-nav'} aria-label={localize("主要導覽")}>{navItems.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'} onClick={() => setOpen(false)}><Icon size={16} /><span>{localize(label)}</span></NavLink>)}</nav><label className="language-control"><span className="sr-only">{t('介面語言', 'Interface language')}</span><select value={locale} onChange={(event) => setLocale(event.target.value as Locale)} aria-label={t('介面語言', 'Interface language')}><option value="zh-TW">繁體中文</option><option value="en">English</option></select></label><AuthControl /><span className={`service-status ${healthError ? 'offline' : ''}`} aria-label={healthError ? localize("服務離線") : health ? localize("服務正常") : localize("正在確認服務狀態")}><i aria-hidden="true" />{healthError ? 'OFFLINE' : health ? localize("已連線") : 'SYNCING'}</span></header><main id="main-content"><Routes><Route path="/" element={<TodayPage />} /><Route path="/programs" element={<ProgramsPage />} /><Route path="/programs/:slug" element={<ProgramPage />} /><Route path="/library" element={<LibraryPage />} /><Route path="/nutrition" element={<NutritionPage />} /><Route path="/progress" element={<ProgressPage />} /><Route path="/workout/:id" element={<WorkoutPage />} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></main><nav className="mobile-nav" aria-label={localize("行動版主要導覽")}>{navItems.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'}><Icon size={19} /><span>{localize(label)}</span></NavLink>)}</nav></>
+  const items = user ? navItems : navItems.filter((item) => item.to === '/programs' || item.to === '/library')
+  const showHeaderAuth = Boolean(user) || location.pathname !== '/'
+  return <>
+    <a className="skip-link" href="#main-content">{localize("跳至主要內容")}</a>
+    <header className="site-header">
+      <Link className="brand" to="/" aria-label={localize("FitFlow Cloud 首頁")}><span className="brand-mark">FF</span><span>FITFLOW<small>{localize("週期訓練 / TRAINING LOG")}</small></span></Link>
+      <button className="menu-button" aria-label={open ? localize("關閉選單") : localize("開啟選單")} aria-expanded={open} onClick={() => setOpen(!open)}>{open ? <X /> : <Menu />}</button>
+      <nav className={open ? 'main-nav open' : 'main-nav'} aria-label={localize("主要導覽")}>{items.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'} onClick={() => setOpen(false)}><Icon size={16} /><span>{localize(label)}</span></NavLink>)}</nav>
+      <label className="language-control"><span className="sr-only">{t('介面語言', 'Interface language')}</span><select value={locale} onChange={(event) => setLocale(event.target.value as Locale)} aria-label={t('介面語言', 'Interface language')}><option value="zh-TW">繁體中文</option><option value="en">English</option></select></label>
+      {showHeaderAuth && <AuthControl />}
+      <span className={`service-status ${healthError ? 'offline' : ''}`} aria-label={healthError ? localize("服務離線") : health ? localize("服務正常") : localize("正在確認服務狀態")}><i aria-hidden="true" />{healthError ? 'OFFLINE' : health ? localize("已連線") : 'SYNCING'}</span>
+    </header>
+    <main id="main-content"><Routes><Route path="/" element={user ? <TodayPage /> : <LandingPage />} /><Route path="/programs" element={<ProgramsPage />} /><Route path="/programs/:slug" element={<ProgramPage />} /><Route path="/library" element={<LibraryPage />} /><Route path="/nutrition" element={<PrivateRoute><NutritionPage /></PrivateRoute>} /><Route path="/progress" element={<PrivateRoute><ProgressPage /></PrivateRoute>} /><Route path="/workout/:id" element={<PrivateRoute><WorkoutPage /></PrivateRoute>} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></main>
+    {user && <nav className="mobile-nav" aria-label={localize("行動版主要導覽")}>{items.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === '/'}><Icon size={19} /><span>{localize(label)}</span></NavLink>)}</nav>}
+  </>
 }
 
 function TodayPage() { const { localize, t, locale } = useI18n();
@@ -66,4 +118,4 @@ function WorkoutPage() { const { localize, t } = useI18n(); const { id = '' } = 
   return <div className="page workout-page"><header className="workout-head"><Link className="back-link" to="/"><ArrowRight size={16} />{localize("返回今日")}</Link><p className="eyebrow">WORKOUT CONSOLE / W{session.weekNumber} D{session.dayNumber}</p><h1>{localize(session.title)}</h1><p>{localize(session.focus)} · {t('預計', 'Estimated')} {session.durationMinutes} MIN · {localize(session.intensity)}</p></header><aside className="console-bar"><div><span>ELAPSED</span><strong aria-label={localize("已訓練時間")}>{formatTime(elapsed)}</strong></div><div><span>SETS</span><strong>{String(completeCount).padStart(2, '0')}<small> / {String(sets.length).padStart(2, '0')}</small></strong></div><button className="button signal" onClick={start} disabled={Boolean(startedAt)}>{startedAt ? <><Check size={16} />{localize("計時中")}</> : <><Play size={16} fill="currentColor" />{localize("開始")}</>}</button></aside>{!startedAt && <p className="console-note">{localize("啟動計時後即可標記每一組。使用 Tab 與空白鍵也能完成操作。")}</p>}<section className="workout-list" aria-label={localize("訓練動作")}>{session.exercises.map((p, index) => <ExerciseWorkout key={p.prescriptionId} prescription={p} index={index} started={Boolean(startedAt)} completed={completed} onToggle={(key) => setCompleted((old) => ({ ...old, [key]: !old[key] }))} />)}</section><section className="finish-panel"><div><p className="eyebrow">SESSION CLOSEOUT</p><h2>{allComplete ? t('所有組數已完成', 'All sets completed') : t(`尚餘 ${sets.length - completeCount} 組`, `${sets.length - completeCount} sets remaining`)}</h2></div><fieldset disabled={!allComplete || submitting}><legend>{localize("主觀強度 RPE · 1 輕鬆 — 10 極吃力")}</legend><div className="rpe" role="group" aria-label={localize("主觀強度 1 到 10")}>{Array.from({ length: 10 }, (_, i) => i + 1).map((n) => <button type="button" key={n} className={rpe === n ? 'selected' : ''} aria-pressed={rpe === n} onClick={() => setRpe(n)}>{n}</button>)}</div><label>{localize("訓練筆記（選填，最多 1000 字）")}<textarea maxLength={1000} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={localize("記下今天的訓練感受")} /></label></fieldset>{submitError && <p className="inline-error" role="alert">{localize(submitError)}</p>}<button className="button signal finish-button" disabled={!allComplete || !startedAt || submitting} onClick={submit}>{submitting ? <LoaderCircle className="spin" size={17} /> : <Check size={17} />}{localize("完成並儲存")}</button></section></div> }
 function ExerciseWorkout({ prescription, index, started, completed, onToggle }: { prescription: Prescription; index: number; started: boolean; completed: Record<string, boolean>; onToggle: (key: string) => void }) { const { localize, t } = useI18n(); const e = prescription.exercise; const target = prescription.reps !== null ? t(`${prescription.reps} 下`, `${prescription.reps} reps`) : t(`${prescription.durationSeconds} 秒`, `${prescription.durationSeconds} sec`); return <article className="workout-exercise"><span className="exercise-number">{String(index + 1).padStart(2, '0')}</span><div className="workout-exercise-content"><header><div><p className="eyebrow">{localize(e.category)}</p><h2>{localize(e.name)}</h2><p>{localize(e.summary)}</p></div><strong>{prescription.sets} × {target}</strong></header><details className="workout-guide"><summary>{localize("動作要點與注意事項")}</summary><ol>{e.instructions.map((step) => <li key={step}>{localize(step)}</li>)}</ol><ul>{e.cautions.map((step) => <li key={step}>{localize(step)}</li>)}</ul></details><div className="set-list">{Array.from({ length: prescription.sets }, (_, i) => { const key = `${prescription.prescriptionId}-${i + 1}`; return <label className={completed[key] ? 'set-row done' : 'set-row'} key={key}><input type="checkbox" disabled={!started} checked={Boolean(completed[key])} onChange={() => onToggle(key)} /><span className="custom-check"><Check size={15} /></span><span>SET {String(i + 1).padStart(2, '0')}</span><strong>{target}</strong><small>REST {prescription.restSeconds}s</small></label> })}</div></div></article> }
 function PageTitle({ eyebrow, title, text }: { eyebrow: string; title: string; text: string }) { return <header className="page-title"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{text}</p></header> }
-export default function App() { return <Shell /> }
+export default function App() { return <AuthProvider><Shell /></AuthProvider> }

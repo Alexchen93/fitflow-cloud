@@ -1,25 +1,157 @@
 # FitFlow Cloud
 
-FitFlow Cloud 是以 Cloudflare Workers、Static Assets 與 D1 建立的全新週期訓練產品。它參考 wger 的運動領域模型，但不是 Django/wger 原始碼的移植，也不依賴舊版 FitFlow。
+> 讓你的訓練和營養，有一條清楚的節奏。
 
-## 目前範圍（MVP）
+[開啟 FitFlow Cloud](https://fitflow-cloud.alex6563834.workers.dev/) · [回報問題](https://github.com/Alexchen93/fitflow-cloud/issues)
 
-- 繁體中文／English React 響應式介面，記住語言選擇
-- 飲食日誌：自訂每 100 克食物標示、餐別／份量、熱量與三大營養素、每日自訂目標
-- 動作庫與逐筆來源／授權欄位
-- 4 週訓練計畫與週期時間軸
-- 今日訓練、組數／次數／時間處方
-- Google Identity Services 登入與帳號隔離的飲食／訓練紀錄
-- 同源 Hono Worker API
-- D1 schema、初始動作與示範計畫
+FitFlow 是一個以**週期訓練、每日執行與飲食紀錄**為核心的個人訓練帳本。它不替你做空泛的健康承諾，而是把「今天該練什麼、完成了哪些組數、吃了什麼」整理成可持續累積的紀錄。
 
-自動規劃、疲勞調整、相機姿勢辨識與 Workers AI 尚未納入第一階段。
+## 先看這裡：如何開始
 
-## 技術架構
+1. 開啟 [FitFlow Cloud](https://fitflow-cloud.alex6563834.workers.dev/)。
+2. 在首頁按 **使用 Google 帳戶登入**。
+3. 登入後會進入「今日訓練」：查看本週課表與今天的訓練單。
+4. 完成訓練時，啟動計時、逐組勾選並儲存；成果會出現在「紀錄」。
+5. 到「營養」先建立常吃食物，再依實際克數記下每一餐。
+
+> 你可以在登入前瀏覽公開的訓練計畫與動作庫；個人的訓練進度、完成紀錄與營養資料需要登入後才能讀取與寫入。
+
+---
+
+## FitFlow 可以幫你做什麼？
+
+### 1. 用週期安排訓練，而不是每天臨時決定
+
+FitFlow 目前提供四週示範週期，依序呈現適應、累積、強化與減量的節奏。你可以在「計畫」中查看每週課表、訓練主題與每堂課的預計時間；在「今日訓練」直接開啟當日訓練單。
+
+**優點**
+
+- 看得見自己在整個週期中的位置，不只看到單一動作。
+- 每堂訓練都有組數、次數或時間與休息處方。
+- 把注意力放在今天該完成的一張訓練單，而不是重新規劃全部內容。
+
+### 2. 在訓練當下記錄，而不是事後憑記憶補寫
+
+訓練頁提供計時、每組完成勾選、RPE 主觀強度和可選筆記。完成並儲存後，系統會把這次訓練寫入你的個人紀錄。
+
+**優點**
+
+- 組數完成度一目了然。
+- RPE 讓你保留當天實際感受，而不只留下「做了／沒做」。
+- 網路重試使用相同的訓練識別碼，不會因重送而重複建立紀錄。
+
+### 3. 以克數記飲食，讓營養數字可回查
+
+「營養」頁先讓你建立食物的每 100 克營養標示，再輸入實際吃下的克數和餐別。FitFlow 會換算熱量、蛋白質、脂肪與碳水化合物，並彙整當日紀錄與目標。
+
+**優點**
+
+- 食物與份量由你定義，適合記錄常吃的包裝食品或自煮食材。
+- 每一餐會依克數換算，不必手動計算三大營養素。
+- 儲存確認遺失時可以安全重試，避免產生重複餐點。
+
+> 營養數值來自你輸入的食品標示；FitFlow 不會自動提供醫療、飲食或熱量攝取建議。
+
+### 4. 保持你的資料只屬於你
+
+FitFlow 使用 Google 登入建立自己的安全工作階段。前端不保存 Google JWT；Worker 驗證 Google ID token 後，以 HttpOnly、Secure、SameSite=Lax cookie 維持登入。
+
+**優點**
+
+- 不同 Google 帳號的訓練完成紀錄、食物、餐點與營養目標彼此隔離。
+- 未登入時，個人訓練、進度與營養資料不會被載入。
+- 登出後可安全結束目前裝置上的 FitFlow 工作階段。
+
+---
+
+## 功能使用手冊
+
+### 首頁與登入
+
+未登入時，首頁會介紹 FitFlow 的用途並提供 Google 登入按鈕。登入完成後，首頁會改為你的「今日訓練」。
+
+如果你直接開啟營養、進度或訓練連結但尚未登入，FitFlow 會帶你回首頁，而不是嘗試顯示個人資料。
+
+### 今日訓練
+
+1. 登入後回到首頁。
+2. 查看本週、第幾堂課、訓練時間與動作數量。
+3. 按 **開始訓練** 開啟訓練單。
+4. 若本期已完成，首頁會提示你前往「紀錄」查看累積結果。
+
+### 訓練執行與儲存
+
+1. 在訓練頁按 **開始** 以啟動計時。
+2. 完成一組就勾選對應的 `SET`。
+3. 所有組數完成後，選擇 RPE（1 很輕鬆，10 極吃力）。
+4. 可選填訓練筆記，再按 **完成並儲存**。
+5. 完成頁會提供前往「紀錄」的入口。
+
+### 計畫與動作庫
+
+- **計畫**：查看目前公開的週期、每週安排與每堂訓練。
+- **動作庫**：可用動作名稱、英文名稱或肌群搜尋；點開任一動作可查看操作要點、注意事項與資料來源。
+- 動作庫與公開計畫可以在未登入時瀏覽。
+
+### 訓練紀錄
+
+「紀錄」會彙整：
+
+- 已完成訓練堂數
+- 累積訓練分鐘
+- 最近一次訓練日期
+- 各次完成訓練的週次、日次、時長與 RPE
+
+### 營養紀錄
+
+#### 第一次使用
+
+1. 進入「營養」。
+2. 按 **新增第一筆食物**。
+3. 依食品包裝或可靠資料填寫每 100 克的熱量與三大營養素。
+4. 儲存後，選擇食物、餐別與實際吃下的克數。
+5. 按 **加入飲食紀錄**。
+
+#### 每日使用
+
+- 切換日期以查看或補登不同日的飲食。
+- 可使用搜尋欄快速找自己建立的食物。
+- 可設定或清空每日熱量與三大營養素目標。
+- 餐點列表可刪除誤記項目。
+
+---
+
+## 常見問題
+
+### 為什麼我看不到營養或訓練紀錄？
+
+這些頁面是個人資料，需要先使用 Google 帳號登入。請從首頁登入後再開啟。
+
+### 我的資料會和其他人混在一起嗎？
+
+不會。訓練完成紀錄、食物、餐點與營養目標都依登入帳號隔離。
+
+### 可以使用不同語言嗎？
+
+可以。頁首可切換繁體中文與 English；FitFlow 會記住你的介面語言。系統不會自動翻譯你自己輸入的食物名稱或訓練筆記。
+
+### FitFlow 會自動幫我設計課表或計算建議熱量嗎？
+
+目前不會。現階段專注於示範週期、訓練執行、完成紀錄與手動營養記錄；自動規劃、疲勞調整與飲食建議不在目前功能範圍。
+
+### 我需要付費或提供 Google Client Secret 嗎？
+
+使用網站不需要。專案部署者設定 Google 登入時只需要 Google OAuth Web Client ID；此流程不使用 Client Secret。
+
+---
+
+## 技術資訊（給開發與部署者）
+
+FitFlow 將前端與 API 部署在同一個 Cloudflare Worker 專案：
 
 ```text
 React 19 + Vite
-       │ same origin /api/*
+       │ same-origin /api/*
        ▼
 Cloudflare Worker (Hono)
        │
@@ -27,9 +159,7 @@ Cloudflare Worker (Hono)
 Cloudflare D1
 ```
 
-靜態前端與 API 由同一個 Worker 專案發佈，避免額外 CORS 與兩套部署流程。
-
-## 本機開發
+### 本機開發
 
 需求：Node.js 22+、npm。
 
@@ -39,90 +169,52 @@ npm run db:migrate:local
 npm run dev
 ```
 
-首次開發會由 Wrangler 在 `.wrangler/` 建立本機 D1。若 migration 已套用，不需重複執行。
-
-完整驗證：
+完整檢查：
 
 ```bash
 npm run check
 ```
 
-## Cloudflare 部署
+### 正式部署
 
-1. 建立正式 D1：
+```bash
+npm run db:migrate:remote
+npm run build
+npm run deploy
+```
 
-   ```bash
-   npx wrangler d1 create fitflow-db
-   ```
+Google 登入需要在 Google Cloud Console 的 OAuth Web Client 加入每個實際使用的 **Authorized JavaScript origin**，例如：
 
-2. 把輸出的 `database_id` 寫入 `wrangler.jsonc`，取代 `local-placeholder`。
-3. 套用正式 migration：
+```text
+http://localhost:5173
+https://fitflow-cloud.alex6563834.workers.dev
+```
 
-   ```bash
-   npm run db:migrate:remote
-   ```
-
-4. 重新建置後發佈（build 會產生部署設定快照）：
-
-   ```bash
-   npm run build
-   npm run deploy
-   ```
-
-在正式 D1 migration 與網址驗證成功以前，不應停止或刪除舊 `fitflow.service`。
-
-## API
-
-- `GET /api/health`
-- `GET /api/exercises?q=&category=`
-- `GET /api/programs`
-- `GET /api/programs/:slug`
-- `GET /api/sessions/:id`
-- `GET /api/today`
-- `GET /api/progress`
-- `POST /api/runs`
-- `GET /api/nutrition?date=YYYY-MM-DD`
-- `POST /api/nutrition/foods`
-- `POST /api/nutrition/entries`
-- `DELETE /api/nutrition/entries/:id`
-- `PUT /api/nutrition/targets`
-
-`/api/today`、`/api/progress`、`POST /api/runs` 與所有 `/api/nutrition/*` 路由都需要已登入的 session。資料僅依帳號隔離；舊匿名裝置資料保留在資料庫中，但不會在登入後暴露。
-
-`POST /api/runs` 由前端提供 UUID `runId`，重送相同記錄會回傳既有結果，避免網路重試產生重複訓練。
-
-## Google 登入設定
-
-FitFlow 使用 Google Identity Services 的 ID token 登入，不使用 Cloudflare Access；因此靜態 UI 可以公開於 workers.dev。建立 **OAuth 2.0 Client ID → Web application** 後，在 Google Cloud Console 的 **Authorized JavaScript origins** 至少加入：
-
-- `http://localhost:5173`
-- `https://fitflow-cloud.alex6563834.workers.dev`
-
-若使用自訂網域或另一個正式部署網址，也必須將該部署專屬 origin 加入。將 Client ID 以 Worker secret 設定（Client ID 雖是 OAuth 協定中的公開值，仍避免寫入提交的部署設定）：
+再以 Worker secret 設定 Client ID：
 
 ```bash
 npx wrangler secret put GOOGLE_CLIENT_ID
 ```
 
-本機可在未提交的 `.dev.vars` 設定 `GOOGLE_CLIENT_ID=...`。不要建立或提交 client secret；此流程不需要它。前端會先請求 `GET /api/auth/config`，只有設定了 Client ID 才載入 `https://accounts.google.com/gsi/client`。Google credential 僅在 Worker 驗證 JWKS、RS256 簽章、issuer、audience、到期時間與已驗證 email 後交換成 HttpOnly、Secure、SameSite=Lax 的不透明 session cookie；前端不保存 JWT。
+不要提交 `.dev.vars`、session cookie、OAuth token 或任何 secret。
 
-## 資料與授權
+### 常用指令
 
-- 此 repository 會公開供檢視與協作；在專案擁有者新增明確授權前，未授予重製、修改或散布程式碼的權利。
-- wger 程式碼採 AGPL-3.0-or-later；本專案目前不複製其 Django 原始碼。
-- 匯入任何 wger 動作、圖片或其他 Creative Commons 資料時，必須逐筆保存來源 URL、授權名稱與授權 URL。
-- `0001_initial.sql` 目前是 FitFlow 自有的示範資料，不代表已完成 wger 資料匯入。
+| 指令                        | 用途                      |
+| --------------------------- | ------------------------- |
+| `npm run dev`               | 啟動本機開發環境          |
+| `npm run test`              | 執行測試                  |
+| `npm run lint`              | 執行靜態檢查              |
+| `npm run build`             | 建置前端與 Worker         |
+| `npm run check`             | lint、測試與建置          |
+| `npm run db:migrate:local`  | 套用本機 D1 migration     |
+| `npm run db:migrate:remote` | 套用正式 D1 migration     |
+| `npm run deploy`            | 發佈至 Cloudflare Workers |
 
-## 下一階段
+---
 
-1. 依目標、程度、器材、頻率產生 Program/Phase。
-2. 疼痛、RPE/RIR、疲勞回饋與自動調整。
-3. 排程拖延、補課、跳過與重新編排。
-4. 相機姿勢辨識；先在瀏覽器端執行即時推論，再只上傳必要指標。
-5. 經授權稽核後建立可重複執行的 wger 資料匯入流程。
+## 資料來源與授權說明
 
-## 營養與語言
-
-營養 API 均需登入 session，資料按 Google 帳號隔離。食物與餐點使用前端 UUID 作為重試鍵；刪除餐點保留 tombstone，避免舊請求重試時重新出現。營養標示由使用者輸入，不是 wger 食物資料庫或自動飲食建議；目標預設為空，可自行設定或清空。
-
-語言切換覆蓋現有介面、示範課表、動作名稱與說明，不翻譯使用者自訂名稱及筆記；新增訓練內容需同步補充 `src/translations.ts`。語言保存在 `fitflow-locale`，切換不會重掛訓練頁或清除訓練狀態。
+- 此專案是獨立實作，參考 wger 的運動領域模型，但不移植 wger 的 Django 原始碼。
+- 若匯入 wger 或其他第三方動作、圖片或 Creative Commons 資料，應為每筆資料保存來源 URL、授權名稱與授權 URL。
+- repository 的授權範圍以專案擁有者新增的正式授權文件為準。

@@ -4,7 +4,8 @@ FitFlow Cloud 是以 Cloudflare Workers、Static Assets 與 D1 建立的全新�
 
 ## 目前範圍（MVP）
 
-- 繁體中文 React 響應式介面
+- 繁體中文／English React 響應式介面，記住語言選擇
+- 飲食日誌：自訂每 100 克食物標示、餐別／份量、熱量與三大營養素、每日自訂目標
 - 動作庫與逐筆來源／授權欄位
 - 4 週訓練計畫與週期時間軸
 - 今日訓練、組數／次數／時間處方
@@ -61,9 +62,10 @@ npm run check
    npm run db:migrate:remote
    ```
 
-4. 發佈：
+4. 重新建置後發佈（build 會產生部署設定快照）：
 
    ```bash
+   npm run build
    npm run deploy
    ```
 
@@ -79,6 +81,11 @@ npm run check
 - `GET /api/today`
 - `GET /api/progress`
 - `POST /api/runs`
+- `GET /api/nutrition?date=YYYY-MM-DD`
+- `POST /api/nutrition/foods`
+- `POST /api/nutrition/entries`
+- `DELETE /api/nutrition/entries/:id`
+- `PUT /api/nutrition/targets`
 
 `/api/today`、`/api/progress` 與 `POST /api/runs` 需要 `x-fitflow-device`。目前這是匿名 MVP 識別，不是身分驗證；公開上線前要加入正式帳號與資料隔離。
 
@@ -99,3 +106,9 @@ npm run check
 4. 排程拖延、補課、跳過與重新編排。
 5. 相機姿勢辨識；先在瀏覽器端執行即時推論，再只上傳必要指標。
 6. 經授權稽核後建立可重複執行的 wger 資料匯入流程。
+
+## 營養與語言
+
+營養 API 均需 `x-fitflow-device`，資料按裝置隔離，尚無帳號跨裝置同步。食物與餐點使用前端 UUID 作為重試鍵；刪除餐點保留 tombstone，避免舊請求重試時重新出現。營養標示由使用者輸入，不是 wger 食物資料庫或自動飲食建議；目標預設為空，可自行設定或清空。
+
+語言切換覆蓋現有介面、示範課表、動作名稱與說明，不翻譯使用者自訂名稱及筆記；新增訓練內容需同步補充 `src/translations.ts`。語言保存在 `fitflow-locale`，切換不會重掛訓練頁或清除訓練狀態。

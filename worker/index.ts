@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { secureHeaders } from 'hono/secure-headers'
 import { z } from 'zod'
+import { nutrition } from './nutrition'
 
 interface Env {
   DB: D1Database
@@ -392,6 +393,8 @@ app.post('/api/runs', async (c) => {
   await c.env.DB.batch(statements)
   return c.json({ ok: true, runId: body.runId, duplicate: false }, 201)
 })
+
+app.route('/api/nutrition', nutrition)
 
 app.onError((error, c) => {
   console.error(error)

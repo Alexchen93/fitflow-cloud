@@ -1,6 +1,8 @@
 import { useEffect, useState, type DependencyList } from 'react'
 import type { Exercise, HealthResponse, Program, ProgramDetail, Progress, RunPayload, TodayResponse, WorkoutSession } from './types'
 
+import type { NutritionDay, NutritionFood, NutritionTargets, EntryPayload } from './nutrition-types'
+
 const DEVICE_KEY = 'x-fitflow-device'
 
 export function getDeviceId() {
@@ -27,6 +29,11 @@ async function request<T>(path: string, options: RequestInit = {}, device = fals
 }
 
 export const api = {
+  nutrition: (date: string) => request<NutritionDay>(`/api/nutrition?date=${encodeURIComponent(date)}`, {}, true),
+  createFood: (food: NutritionFood) => request<{ ok: boolean }>('/api/nutrition/foods', { method: 'POST', body: JSON.stringify(food) }, true),
+  logFood: (entry: EntryPayload) => request<{ ok: boolean }>('/api/nutrition/entries', { method: 'POST', body: JSON.stringify(entry) }, true),
+  deleteFoodEntry: (id: string) => request<{ ok: boolean }>(`/api/nutrition/entries/${encodeURIComponent(id)}`, { method: 'DELETE' }, true),
+  setNutritionTargets: (targets: NutritionTargets) => request<{ ok: boolean }>('/api/nutrition/targets', { method: 'PUT', body: JSON.stringify(targets) }, true),
   health: () => request<HealthResponse>('/api/health'),
   exercises: () => request<{ exercises: Exercise[] }>('/api/exercises'),
   programs: () => request<{ programs: Program[] }>('/api/programs'),

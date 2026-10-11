@@ -1,0 +1,11 @@
+export type Program = { id: string; slug: string; name: string; summary: string; durationWeeks: number; sessionsPerWeek: number; level: string; goal: string }
+export type SessionPreview = { id: string; dayNumber: number; title: string; focus: string; durationMinutes: number; intensity: string }
+export type ProgramPhase = { id: string; position: number; name: string; purpose: string; startWeek: number; endWeek: number }
+export type ProgramDetail = Program & { phases: ProgramPhase[]; weeks: { weekNumber: number; sessions: SessionPreview[] }[] }
+export type Exercise = { id: string; slug: string; name: string; nameEn: string; summary: string; category: string; level: string; equipment: string; primaryMuscles: string[]; instructions: string[]; cautions: string[]; attribution: { source: string; sourceUrl: string; license: string; licenseUrl: string } }
+export type Prescription = { prescriptionId: string; position: number; sets: number; reps: number | null; durationSeconds: number | null; restSeconds: number; exercise: Exercise }
+export type WorkoutSession = { id: string; weekNumber: number; dayNumber: number; title: string; focus: string; durationMinutes: number; intensity: string; exercises: Prescription[] }
+export type TodayResponse = { session: WorkoutSession | null; completedProgram: boolean }
+export type Progress = { summary: { completedSessions: number; totalMinutes: number; lastCompletedAt: string | null }; recent: { id: string; completedAt: string; durationMinutes: number; perceivedEffort: number | null; title: string; focus: string; weekNumber: number; dayNumber: number }[] }
+export type RunPayload = { runId: string; sessionId: string; startedAt: string; completedAt: string; durationSeconds: number; perceivedEffort: number; notes: string; sets: { prescriptionId: string; setNumber: number; reps: number | null; durationSeconds: number | null }[] }
+export type HealthResponse = { ok: boolean; service: string; version: string }

@@ -4,34 +4,23 @@ import app from '../worker/index'
 describe('FitFlow Worker API', () => {
   it('reports service health', async () => {
     const response = await app.request('/api/health')
-
     expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({
-      ok: true,
-      service: 'fitflow-cloud',
-      version: '0.1.0',
-    })
+    await expect(response.json()).resolves.toEqual({ ok: true, service: 'fitflow-cloud', version: '0.1.0' })
   })
 
-  it('rejects a missing device id before reading D1', async () => {
-    const response = await app.request('/api/today')
-
-    expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({ error: '裝置識別碼格式不正確' })
+  it('reports that Google sign-in is unavailable without a runtime client id', async () => {
+    const response = await app.request('/api/auth/config')
+    expect(await response.json()).toEqual({ enabled: false, clientId: null })
   })
 
-  it('rejects malformed workout submissions', async () => {
-    const response = await app.request('/api/runs', {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-fitflow-device': 'fitflow_test_device_123456',
-      },
-      body: JSON.stringify({ sessionId: 'w1d1' }),
-    })
+  it.each(['/api/today', '/api/progress', '/api/nutrition?date=2026-10-11'])('rejects unauthenticated account data requests: %s', async (path) => {
+    const response = await app.request(path)
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({ error: 'Authentication required', code: 'unauthenticated' })
+  })
 
-    expect(response.status).toBe(400)
-    const body = await response.json() as { error: string }
-    expect(body.error).toBe('訓練紀錄格式不正確')
+  it('rejects malformed workout submissions before any device header is considered', async () => {
+    const response = await app.request('/api/runs', { method: 'POST', headers: { 'content-type': 'application/json', 'x-fitflow-device': 'legacy_device_123456' }, body: JSON.stringify({ sessionId: 'w1d1' }) })
+    expect(response.status).toBe(401)
   })
 })

@@ -2,11 +2,15 @@ import { Hono } from 'hono'
 import { secureHeaders } from 'hono/secure-headers'
 import { z } from 'zod'
 import { nutrition } from './nutrition'
+import { clearSessionCookie, createSession, deleteSession, getAuthenticatedUser, sessionCookie, verifyGoogleIdToken, type AuthUser } from './auth'
 
 interface Env {
   DB: D1Database
   ASSETS: Fetcher
+  GOOGLE_CLIENT_ID?: string
 }
+
+type AppEnv = { Bindings: Env; Variables: { authUser: AuthUser | null } }
 
 type ExerciseRow = {
   id: string
@@ -37,28 +41,29 @@ type SessionRow = {
   intensity: string
 }
 
-const app = new Hono<{ Bindings: Env }>()
+const app = new Hono<AppEnv>()
 
-const deviceIdPattern = /^[a-zA-Z0-9_-]{16,128}$/
-
-const getDeviceId = (value: string | undefined) => {
-  const deviceId = value?.trim()
-  return deviceId && deviceIdPattern.test(deviceId) ? deviceId : null
-}
+const requireUser = (user: AuthUser | null) => user ? user : null
 
 app.use('*', secureHeaders({
   contentSecurityPolicy: {
     defaultSrc: ["'self'"],
-    scriptSrc: ["'self'"],
+    scriptSrc: ["'self'", 'https://accounts.google.com/gsi/client'],
     styleSrc: ["'self'", "'unsafe-inline'"],
     imgSrc: ["'self'", 'data:', 'https://wger.de'],
     connectSrc: ["'self'"],
+    frameSrc: ['https://accounts.google.com'],
     fontSrc: ["'self'", 'data:'],
     objectSrc: ["'none'"],
     frameAncestors: ["'none'"],
   },
   referrerPolicy: 'strict-origin-when-cross-origin',
 }))
+
+app.use('*', async (c, next) => {
+  c.set('authUser', c.env?.DB ? await getAuthenticatedUser(c.env.DB, c.req.raw) : null)
+  await next()
+})
 
 const jsonArray = (value: string): string[] => {
   try {
@@ -129,6 +134,33 @@ async function getSession(db: D1Database, sessionId: string) {
     })),
   }
 }
+
+app.get('/api/auth/config', (c) => c.json({ enabled: Boolean(c.env?.GOOGLE_CLIENT_ID), clientId: c.env?.GOOGLE_CLIENT_ID || null }))
+
+app.get('/api/auth/me', (c) => {
+  const user = c.get('authUser')
+  return c.json({ authenticated: Boolean(user), user: user ? { email: user.email, name: user.name, picture: user.picture } : null })
+})
+
+app.post('/api/auth/google', async (c) => {
+  const clientId = c.env.GOOGLE_CLIENT_ID
+  if (!clientId) return c.json({ error: 'Google sign-in is not configured', code: 'auth_unavailable' }, 503)
+  const credential = z.object({ credential: z.string().min(1).max(12000) }).safeParse(await c.req.json().catch(() => null))
+  if (!credential.success) return c.json({ error: 'Invalid Google credential', code: 'invalid_credential' }, 400)
+  try {
+    const session = await createSession(c.env.DB, await verifyGoogleIdToken(credential.data.credential, clientId))
+    c.header('Set-Cookie', sessionCookie(session.sessionId, session.expiresAt))
+    return c.json({ authenticated: true, user: { email: session.user.email, name: session.user.name, picture: session.user.picture } })
+  } catch {
+    return c.json({ error: 'Google credential could not be verified', code: 'invalid_credential' }, 401)
+  }
+})
+
+app.post('/api/auth/signout', async (c) => {
+  await deleteSession(c.env.DB, c.req.raw)
+  c.header('Set-Cookie', clearSessionCookie())
+  return c.json({ ok: true })
+})
 
 app.get('/api/health', (c) => c.json({ ok: true, service: 'fitflow-cloud', version: '0.1.0' }))
 
@@ -261,8 +293,8 @@ app.get('/api/sessions/:id', async (c) => {
 })
 
 app.get('/api/today', async (c) => {
-  const deviceId = getDeviceId(c.req.header('x-fitflow-device'))
-  if (!deviceId) return c.json({ error: '裝置識別碼格式不正確' }, 400)
+  const user = requireUser(c.get('authUser'))
+  if (!user) return c.json({ error: 'Authentication required', code: 'unauthenticated' }, 401)
 
   const next = await c.env.DB.prepare(`
     SELECT ps.id
@@ -271,11 +303,11 @@ app.get('/api/today', async (c) => {
     WHERE p.is_published = 1
       AND NOT EXISTS (
         SELECT 1 FROM workout_runs wr
-        WHERE wr.session_id = ps.id AND wr.device_id = ? AND wr.completed_at IS NOT NULL
+        WHERE wr.session_id = ps.id AND wr.user_id = ? AND wr.completed_at IS NOT NULL
       )
     ORDER BY ps.week_number, ps.day_number
     LIMIT 1
-  `).bind(deviceId).first<{ id: string }>()
+  `).bind(user.id).first<{ id: string }>()
 
   if (!next) return c.json({ session: null, completedProgram: true })
 
@@ -284,26 +316,26 @@ app.get('/api/today', async (c) => {
 })
 
 app.get('/api/progress', async (c) => {
-  const deviceId = getDeviceId(c.req.header('x-fitflow-device'))
-  if (!deviceId) return c.json({ error: '裝置識別碼格式不正確' }, 400)
+  const user = requireUser(c.get('authUser'))
+  if (!user) return c.json({ error: 'Authentication required', code: 'unauthenticated' }, 401)
 
   const summary = await c.env.DB.prepare(`
     SELECT COUNT(*) AS completed_sessions,
            COALESCE(SUM(duration_seconds), 0) AS total_seconds,
            MAX(completed_at) AS last_completed_at
     FROM workout_runs
-    WHERE device_id = ? AND completed_at IS NOT NULL
-  `).bind(deviceId).first<{ completed_sessions: number; total_seconds: number; last_completed_at: string | null }>()
+    WHERE user_id = ? AND completed_at IS NOT NULL
+  `).bind(user.id).first<{ completed_sessions: number; total_seconds: number; last_completed_at: string | null }>()
 
   const recent = await c.env.DB.prepare(`
     SELECT wr.id, wr.completed_at, wr.duration_seconds, wr.perceived_effort,
            ps.title, ps.focus, ps.week_number, ps.day_number
     FROM workout_runs wr
     JOIN program_sessions ps ON ps.id = wr.session_id
-    WHERE wr.device_id = ? AND wr.completed_at IS NOT NULL
+    WHERE wr.user_id = ? AND wr.completed_at IS NOT NULL
     ORDER BY wr.completed_at DESC
     LIMIT 8
-  `).bind(deviceId).all<{
+  `).bind(user.id).all<{
     id: string
     completed_at: string
     duration_seconds: number
@@ -353,8 +385,8 @@ const completedRunSchema = z.object({
 )
 
 app.post('/api/runs', async (c) => {
-  const deviceId = getDeviceId(c.req.header('x-fitflow-device'))
-  if (!deviceId) return c.json({ error: '裝置識別碼格式不正確' }, 400)
+  const user = requireUser(c.get('authUser'))
+  if (!user) return c.json({ error: 'Authentication required', code: 'unauthenticated' }, 401)
 
   const parsed = completedRunSchema.safeParse(await c.req.json().catch(() => null))
   if (!parsed.success) return c.json({ error: '訓練紀錄格式不正確', details: parsed.error.flatten() }, 400)
@@ -373,16 +405,16 @@ app.post('/api/runs', async (c) => {
   }
 
   const existing = await c.env.DB.prepare(`
-    SELECT id FROM workout_runs WHERE id = ? AND device_id = ?
-  `).bind(body.runId, deviceId).first<{ id: string }>()
+    SELECT id FROM workout_runs WHERE id = ? AND user_id = ?
+  `).bind(body.runId, user.id).first<{ id: string }>()
   if (existing) return c.json({ ok: true, runId: existing.id, duplicate: true })
 
   const statements: D1PreparedStatement[] = [
     c.env.DB.prepare(`
       INSERT INTO workout_runs
-        (id, device_id, session_id, started_at, completed_at, duration_seconds, perceived_effort, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(body.runId, deviceId, body.sessionId, body.startedAt, body.completedAt, body.durationSeconds, body.perceivedEffort, body.notes),
+        (id, device_id, user_id, session_id, started_at, completed_at, duration_seconds, perceived_effort, notes)
+      VALUES (?, '', ?, ?, ?, ?, ?, ?, ?)
+    `).bind(body.runId, user.id, body.sessionId, body.startedAt, body.completedAt, body.durationSeconds, body.perceivedEffort, body.notes),
     ...body.sets.map((set) => c.env.DB.prepare(`
       INSERT INTO set_logs
         (id, run_id, session_exercise_id, set_number, reps, duration_seconds, completed)

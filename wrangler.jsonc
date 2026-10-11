@@ -13,7 +13,7 @@
     {
       "binding": "DB",
       "database_name": "fitflow-db",
-      "database_id": "local-placeholder",
+      "database_id": "b449330d-a394-4948-b23c-eb5e2928366d",
       "migrations_dir": "migrations"
     }
   ],
